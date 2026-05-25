@@ -398,7 +398,9 @@ class _ImageMessageBubbleState extends State<ImageMessageBubble> {
         _clearRequestState();
         await _showBlockingAlert(
           'Cannot fetch image',
-          'Sender route did not respond on the raw transport path.',
+          conn.rawTransportUnsupported
+              ? 'Connected radio firmware does not support raw data transfer for images.'
+              : 'Sender route did not respond on the raw transport path.',
         );
         return;
       }

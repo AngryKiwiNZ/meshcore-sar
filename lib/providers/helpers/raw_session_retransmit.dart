@@ -19,6 +19,7 @@ Future<bool> serveCachedSessionFragments<T>({
   required Uint8List Function(T fragment) encodeBinary,
   required RawPacketSender? sendRawPacket,
   Set<int>? requestedIndices,
+  Duration interFragmentDelay = Duration.zero,
 }) async {
   if (fragments.isEmpty) {
     debugPrint('⚠️ [$providerLabel] No cached fragments for $sessionId');
@@ -38,7 +39,7 @@ Future<bool> serveCachedSessionFragments<T>({
     );
     return false;
   }
-  if (requester.outPath.isEmpty) {
+  if (requester.routeHopCount > 0 && requester.outPath.isEmpty) {
     debugPrint(
       '⚠️ [$providerLabel] ${requester.advName} has empty outPath payload',
     );
@@ -62,6 +63,9 @@ Future<bool> serveCachedSessionFragments<T>({
         payload: encodeBinary(fragment),
       );
       servedCount++;
+      if (interFragmentDelay > Duration.zero) {
+        await Future<void>.delayed(interFragmentDelay);
+      }
     } catch (e, st) {
       debugPrint(
         '❌ [$providerLabel] Serve error for $sessionId#$index: $e\n$st',

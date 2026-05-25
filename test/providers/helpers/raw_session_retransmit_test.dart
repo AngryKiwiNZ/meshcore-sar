@@ -11,13 +11,17 @@ class _Fragment {
   _Fragment(this.index, this.payload);
 }
 
-Contact _buildContact({required int outPathLen}) {
+Contact _buildContact({
+  required int outPathLen,
+  Uint8List? outPath,
+}) {
   return Contact(
     publicKey: Uint8List.fromList(List<int>.generate(32, (i) => i)),
     type: ContactType.chat,
     flags: 0,
     outPathLen: outPathLen,
-    outPath: Uint8List.fromList(List<int>.generate(8, (i) => i + 1)),
+    outPath:
+        outPath ?? Uint8List.fromList(List<int>.generate(8, (i) => i + 1)),
     advName: 'Requester',
     lastAdvert: DateTime.now().millisecondsSinceEpoch ~/ 1000,
     advLat: 0,
@@ -69,7 +73,7 @@ void main() {
       expect(ok, isFalse);
     });
 
-    test('returns false when requester path payload is empty', () async {
+    test('returns false when relayed requester path payload is empty', () async {
       final requester = Contact(
         publicKey: Uint8List.fromList(List<int>.generate(32, (i) => i)),
         type: ContactType.chat,
@@ -102,6 +106,35 @@ void main() {
       );
 
       expect(ok, isFalse);
+    });
+
+    test('sends zero-hop direct packets with an empty route payload', () async {
+      final sentPathLens = <int>[];
+      final sentPaths = <Uint8List>[];
+      final ok = await serveCachedSessionFragments<_Fragment>(
+        providerLabel: 'TestProvider',
+        sessionId: 'deadbeef',
+        requester: _buildContact(outPathLen: 0, outPath: Uint8List(0)),
+        fragments: [
+          _Fragment(0, Uint8List.fromList([10])),
+        ],
+        maxDirectPayloadHops: 3,
+        indexOf: (f) => f.index,
+        encodeBinary: (f) => f.payload,
+        sendRawPacket:
+            ({
+              required contactPath,
+              required contactPathLen,
+              required payload,
+            }) async {
+              sentPathLens.add(contactPathLen);
+              sentPaths.add(contactPath);
+            },
+      );
+
+      expect(ok, isTrue);
+      expect(sentPathLens, [0]);
+      expect(sentPaths.single, isEmpty);
     });
 
     test('sends only requested indices', () async {

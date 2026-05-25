@@ -126,6 +126,9 @@ class ConnectionProvider with ChangeNotifier {
 
   String? _error;
   String? get error => _error;
+  bool _rawTransportUnsupported = false;
+  bool get rawTransportUnsupported => _rawTransportUnsupported;
+  DateTime? _lastRawTransportSendAt;
 
   // Activity indicators (for blinking)
   bool _rxActivity = false;
@@ -376,6 +379,12 @@ class ConnectionProvider with ChangeNotifier {
       if (errorCode == 2 && _suppressNextPreviewNotFoundError) {
         _suppressNextPreviewNotFoundError = false;
         return;
+      }
+      if (errorCode == MeshCoreConstants.errUnsupportedCmd &&
+          _lastRawTransportSendAt != null &&
+          DateTime.now().difference(_lastRawTransportSendAt!) <
+              const Duration(seconds: 5)) {
+        _rawTransportUnsupported = true;
       }
       debugPrint('⚠️ [Provider] Error received: $error');
       _error = error;
@@ -1777,7 +1786,9 @@ class ConnectionProvider with ChangeNotifier {
       debugPrint('  Channel: $channelIdx');
       debugPrint('  Text: $text');
       debugPrint('  MessageID: $messageId');
-      debugPrint('  FloodScope: ${floodScopeKey != null ? "set (${floodScopeKey.length}B)" : "none"}');
+      debugPrint(
+        '  FloodScope: ${floodScopeKey != null ? "set (${floodScopeKey.length}B)" : "none"}',
+      );
 
       await _activeService.sendChannelMessage(
         channelIdx: channelIdx,
@@ -1827,11 +1838,54 @@ class ConnectionProvider with ChangeNotifier {
     required Uint8List payload,
   }) async {
     if (!_activeService.isConnected) return;
+    _lastRawTransportSendAt = DateTime.now();
+    final descriptor = contactPathLen & 0xFF;
+    final hopCount = descriptor & 0x3F;
+    final hashSize = ((descriptor >> 6) & 0x03) + 1;
+    final pathByteLen = descriptor == 0xFF ? 0 : hopCount * hashSize;
+    final shouldNormalizeEncodedPath = descriptor != 0xFF && descriptor >= 0x40;
+    final legacyRawPath = shouldNormalizeEncodedPath
+        ? _legacyRawTransportPath(
+            contactPath: contactPath,
+            descriptor: descriptor,
+          )
+        : null;
+    final rawPathLen = shouldNormalizeEncodedPath ? hopCount : contactPathLen;
+    final rawPath = shouldNormalizeEncodedPath
+        ? (legacyRawPath ?? Uint8List(0))
+        : contactPath;
+    final rawPathPreview = rawPath
+        .take(rawPathLen.clamp(0, rawPath.length))
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    debugPrint(
+      '📤 [RawTX] cmd=0x19 descriptor=0x${descriptor.toRadixString(16).padLeft(2, '0')} '
+      'hops=$hopCount hashSize=$hashSize pathBytes=$pathByteLen '
+      'rawLen=$rawPathLen payload=${payload.length} path=$rawPathPreview',
+    );
     await _activeService.sendRawVoicePacket(
-      contactPathLen: contactPathLen,
-      contactPath: contactPath,
+      contactPathLen: rawPathLen,
+      contactPath: rawPath,
       payload: payload,
     );
+  }
+
+  Uint8List? _legacyRawTransportPath({
+    required Uint8List contactPath,
+    required int descriptor,
+  }) {
+    if (descriptor == 0xFF || descriptor < 0x40) return null;
+    final hopCount = descriptor & 0x3F;
+    final hashSize = ((descriptor >> 6) & 0x03) + 1;
+    if (hopCount <= 0) return Uint8List(0);
+    if (hashSize <= 1) return null;
+    if (contactPath.length < hopCount * hashSize) return null;
+
+    final legacy = Uint8List(hopCount);
+    for (var hop = 0; hop < hopCount; hop++) {
+      legacy[hop] = contactPath[hop * hashSize];
+    }
+    return legacy;
   }
 
   /// Send a raw private zero-hop payload.
@@ -2064,7 +2118,11 @@ class ConnectionProvider with ChangeNotifier {
   Future<RelayPingResult> pingRelay(Contact contact) async {
     if (!_activeService.isConnected) {
       return const RelayPingResult(
-        success: false, durationMs: 0, snrThere: 0, snrBack: 0, hopCount: 0,
+        success: false,
+        durationMs: 0,
+        snrThere: 0,
+        snrBack: 0,
+        hopCount: 0,
       );
     }
 
@@ -2078,9 +2136,15 @@ class ConnectionProvider with ChangeNotifier {
       _pendingRelayPings.remove(nonce);
       _relayPingStartTimes.remove(nonce);
       if (!completer.isCompleted) {
-        completer.complete(const RelayPingResult(
-          success: false, durationMs: 0, snrThere: 0, snrBack: 0, hopCount: 0,
-        ));
+        completer.complete(
+          const RelayPingResult(
+            success: false,
+            durationMs: 0,
+            snrThere: 0,
+            snrBack: 0,
+            hopCount: 0,
+          ),
+        );
       }
     });
 
@@ -2099,13 +2163,20 @@ class ConnectionProvider with ChangeNotifier {
       _pendingRelayPings.remove(nonce);
       _relayPingStartTimes.remove(nonce);
       return const RelayPingResult(
-        success: false, durationMs: 0, snrThere: 0, snrBack: 0, hopCount: 0,
+        success: false,
+        durationMs: 0,
+        snrThere: 0,
+        snrBack: 0,
+        hopCount: 0,
       );
     }
   }
 
   void _handleTraceDataReceived(
-    int nonce, int hopCount, double snrThere, double snrBack,
+    int nonce,
+    int hopCount,
+    double snrThere,
+    double snrBack,
   ) {
     final completer = _pendingRelayPings.remove(nonce);
     final startTime = _relayPingStartTimes.remove(nonce);
@@ -2113,13 +2184,15 @@ class ConnectionProvider with ChangeNotifier {
       final durationMs = startTime != null
           ? DateTime.now().millisecondsSinceEpoch - startTime
           : 0;
-      completer.complete(RelayPingResult(
-        success: true,
-        durationMs: durationMs,
-        snrThere: snrThere,
-        snrBack: snrBack,
-        hopCount: hopCount,
-      ));
+      completer.complete(
+        RelayPingResult(
+          success: true,
+          durationMs: durationMs,
+          snrThere: snrThere,
+          snrBack: snrBack,
+          hopCount: hopCount,
+        ),
+      );
     }
   }
 

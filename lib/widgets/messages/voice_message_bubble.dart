@@ -360,7 +360,9 @@ class _VoiceMessageBubbleState extends State<VoiceMessageBubble> {
         _clearRequestState();
         await _showBlockingAlert(
           'Cannot fetch voice',
-          'Sender route did not respond on the raw transport path.',
+          connectionProvider.rawTransportUnsupported
+              ? 'Connected radio firmware does not support raw data transfer for voice.'
+              : 'Sender route did not respond on the raw transport path.',
         );
         return;
       }

@@ -2018,9 +2018,8 @@ class AppProvider with ChangeNotifier {
 
     final latestContact =
         contactsProvider.findContactByKey(contact.publicKey) ?? contact;
-    final manualSelection = await _pathHistoryService.getManualSelectionForContact(
-      latestContact,
-    );
+    final manualSelection = await _pathHistoryService
+        .getManualSelectionForContact(latestContact);
     final session =
         _directMessageRouteSessions[messageId] ??
         _DirectMessageRouteSession(
@@ -2875,7 +2874,8 @@ class AppProvider with ChangeNotifier {
     final sharingMode = channelLocationSharingModeForChannel(channelIdx);
 
     return ChannelLocationSharingState(
-      mode: sharingMode ??
+      mode:
+          sharingMode ??
           (_hardwareChannelLocationSharingSupported
               ? ChannelLocationSharingMode.hardware
               : ChannelLocationSharingMode.appFallback),
@@ -2917,7 +2917,9 @@ class AppProvider with ChangeNotifier {
         await locationTrackingService.setFastLocationUpdatesEnabled(false);
         await refreshChannelLocationSharingState();
         if (_hardwareChannelLocationSharingChannelIdx != channelIdx) {
-          throw StateError('Radio location sharing did not enable for this channel');
+          throw StateError(
+            'Radio location sharing did not enable for this channel',
+          );
         }
         notifyListeners();
         return ChannelLocationSharingResult(
@@ -2927,13 +2929,16 @@ class AppProvider with ChangeNotifier {
             hardwareSupported: true,
             isConnected: true,
           ),
-          message: l10n?.sharingLocationFromRadio ?? 'Sharing location on this channel from the radio.',
+          message:
+              l10n?.sharingLocationFromRadio ??
+              'Sharing location on this channel from the radio.',
         );
       }
 
       _hardwareChannelLocationSharingSupported = false;
       _hardwareChannelLocationSharingChannelIdx = null;
-      final previousEnabled = locationTrackingService.fastLocationUpdatesEnabled;
+      final previousEnabled =
+          locationTrackingService.fastLocationUpdatesEnabled;
       final previousChannelIdx = locationTrackingService.fastLocationChannelIdx;
       try {
         await locationTrackingService.updateFastLocationChannelIdx(channelIdx);
@@ -2958,12 +2963,14 @@ class AppProvider with ChangeNotifier {
         state: const ChannelLocationSharingState(
           mode: ChannelLocationSharingMode.appFallback,
           isSharing: true,
-            hardwareSupported: false,
-            isConnected: true,
-          ),
-          message: l10n?.sharingLocationFromPhone ?? 'Sharing location on this channel from the phone.',
-        );
-      }
+          hardwareSupported: false,
+          isConnected: true,
+        ),
+        message:
+            l10n?.sharingLocationFromPhone ??
+            'Sharing location on this channel from the phone.',
+      );
+    }
 
     final activeHardwareChannelIdx = _hardwareChannelLocationSharingIdxFromVars(
       vars,
@@ -2985,7 +2992,9 @@ class AppProvider with ChangeNotifier {
       _hardwareChannelLocationSharingChannelIdx = null;
       await refreshChannelLocationSharingState();
       if (_hardwareChannelLocationSharingChannelIdx == channelIdx) {
-        throw StateError('Radio location sharing is still enabled for this channel');
+        throw StateError(
+          'Radio location sharing is still enabled for this channel',
+        );
       }
       notifyListeners();
       return ChannelLocationSharingResult(
@@ -2995,7 +3004,9 @@ class AppProvider with ChangeNotifier {
           hardwareSupported: true,
           isConnected: true,
         ),
-        message: l10n?.stoppedSharingLocation ?? 'Stopped sharing location on this channel.',
+        message:
+            l10n?.stoppedSharingLocation ??
+            'Stopped sharing location on this channel.',
       );
     }
 
@@ -3009,7 +3020,9 @@ class AppProvider with ChangeNotifier {
         hardwareSupported: false,
         isConnected: true,
       ),
-      message: l10n?.stoppedSharingLocation ?? 'Stopped sharing location on this channel.',
+      message:
+          l10n?.stoppedSharingLocation ??
+          'Stopped sharing location on this channel.',
     );
   }
 
@@ -3206,7 +3219,7 @@ class AppProvider with ChangeNotifier {
       if (!contact.routeHasPath ||
           contact.routeHopCount > _maxDirectPayloadHops ||
           !contact.routeSupportsLegacyRawTransport ||
-          contact.outPath.isEmpty ||
+          (contact.routeHopCount > 0 && contact.outPath.isEmpty) ||
           contact.publicKey.length < 6) {
         return false;
       }
@@ -3248,7 +3261,7 @@ class AppProvider with ChangeNotifier {
     if (requester == null ||
         !requester.routeHasPath ||
         requester.routeHopCount > _maxDirectPayloadHops ||
-        requester.outPath.isEmpty) {
+        (requester.routeHopCount > 0 && requester.outPath.isEmpty)) {
       return;
     }
     unawaited(
@@ -3347,7 +3360,7 @@ class AppProvider with ChangeNotifier {
           if (responder == null ||
               !responder.routeHasPath ||
               responder.routeHopCount > _maxDirectPayloadHops ||
-              responder.outPath.isEmpty) {
+              (responder.routeHopCount > 0 && responder.outPath.isEmpty)) {
             continue;
           }
 
@@ -3843,10 +3856,13 @@ class AppProvider with ChangeNotifier {
     if (!connectionProvider.deviceInfo.isConnected) {
       return false;
     }
+    if (connectionProvider.rawTransportUnsupported) {
+      return false;
+    }
     if (!target.routeHasPath || target.routeHopCount > _maxDirectPayloadHops) {
       return false;
     }
-    if (target.outPath.isEmpty) {
+    if (target.routeHopCount > 0 && target.outPath.isEmpty) {
       return false;
     }
 
@@ -3884,7 +3900,10 @@ class AppProvider with ChangeNotifier {
             requesterKey6: requesterKey6,
           ).encodeBinary(),
         );
-        return await ackFuture;
+        return await Future.any([
+          ackFuture,
+          _rawTransportUnsupportedSignal(timeout),
+        ]);
       } catch (e) {
         debugPrint(
           '⚠️ [AppProvider] Raw route probe failed for ${target.advName}: $e',
@@ -3900,6 +3919,17 @@ class AppProvider with ChangeNotifier {
     } finally {
       _pendingRawRouteProbes.remove(probeKey);
     }
+  }
+
+  Future<bool> _rawTransportUnsupportedSignal(Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (connectionProvider.rawTransportUnsupported) {
+        return false;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    return false;
   }
 
   String _routeProbeTargetKey(Contact target) {
@@ -3924,7 +3954,7 @@ class AppProvider with ChangeNotifier {
       );
       return;
     }
-    if (requester.outPath.isEmpty) {
+    if (requester.routeHopCount > 0 && requester.outPath.isEmpty) {
       return;
     }
     debugPrint(

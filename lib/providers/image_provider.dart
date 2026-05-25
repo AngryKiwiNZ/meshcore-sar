@@ -289,6 +289,7 @@ class ImageProvider with ChangeNotifier {
       encodeBinary: (fragment) => fragment.encodeBinary(),
       sendRawPacket: sendRawPacketCallback,
       requestedIndices: requestedIndices,
+      interFragmentDelay: const Duration(milliseconds: 350),
     );
   }
 

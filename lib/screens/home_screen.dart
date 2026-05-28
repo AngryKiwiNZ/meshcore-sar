@@ -74,6 +74,8 @@ class _HomeScreenState extends State<HomeScreen>
   String? _lastProfileDeviceKey;
   Timer? _sensorAutoRefreshTicker;
 
+  bool get _useBestEffortAdvertFlow => true;
+
   List<_HomeTab> get _enabledTabs {
     return [
       _HomeTab.messages,
@@ -684,6 +686,10 @@ class _HomeScreenState extends State<HomeScreen>
     bool floodMode = true,
   }) async {
     final connectionProvider = context.read<ConnectionProvider>();
+    debugPrint(
+      '[Home] Advert requested: mode=${floodMode ? 'flood' : 'direct'} '
+      'connected=${connectionProvider.deviceInfo.isConnected}',
+    );
 
     if (!connectionProvider.deviceInfo.isConnected) {
       if (context.mounted) {
@@ -696,53 +702,81 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     try {
-      // Check if location services are enabled
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (context.mounted) {
-          ToastLogger.error(
-            context,
-            AppLocalizations.of(context)!.locationServicesDisabled,
-          );
-        }
-        return;
-      }
+      var updatedLocation = false;
+      final position = Position(
+        latitude: 0,
+        longitude: 0,
+        timestamp: DateTime.fromMillisecondsSinceEpoch(0),
+        accuracy: 0,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+      if (_useBestEffortAdvertFlow) {
+        try {
+          final serviceEnabled = await Geolocator.isLocationServiceEnabled()
+              .timeout(const Duration(seconds: 2));
 
-      // Check location permissions
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          if (context.mounted) {
-            ToastLogger.error(
-              context,
-              AppLocalizations.of(context)!.locationPermissionDenied,
+          if (serviceEnabled) {
+            var permission = await Geolocator.checkPermission().timeout(
+              const Duration(seconds: 2),
             );
-          }
-          return;
-        }
-      }
+            if (permission == LocationPermission.denied) {
+              permission = await Geolocator.requestPermission().timeout(
+                const Duration(seconds: 10),
+              );
+            }
 
-      if (permission == LocationPermission.deniedForever) {
+            if (permission == LocationPermission.always ||
+                permission == LocationPermission.whileInUse) {
+              final position = await Geolocator.getCurrentPosition(
+                locationSettings: const LocationSettings(
+                  accuracy: LocationAccuracy.best,
+                  distanceFilter: 0,
+                ),
+              ).timeout(const Duration(seconds: 5));
+
+              await connectionProvider.setAdvertLatLon(
+                latitude: position.latitude,
+                longitude: position.longitude,
+              );
+              updatedLocation = true;
+              debugPrint(
+                '[Home] Advert location updated: '
+                '${position.latitude.toStringAsFixed(6)}, '
+                '${position.longitude.toStringAsFixed(6)}',
+              );
+
+              await Future.delayed(const Duration(milliseconds: 100));
+            } else {
+              debugPrint('[Home] Advert GPS skipped: permission=$permission');
+            }
+          } else {
+            debugPrint('[Home] Advert GPS skipped: location services disabled');
+          }
+        } catch (e) {
+          debugPrint('[Home] Advert GPS update skipped: $e');
+        }
+
+        await connectionProvider.sendSelfAdvert(floodMode: floodMode);
+
         if (context.mounted) {
-          ToastLogger.error(
+          ToastLogger.success(
             context,
-            AppLocalizations.of(context)!.locationPermissionPermanentlyDenied,
+            updatedLocation
+                ? (floodMode ? 'Flood advert sent' : 'Direct advert sent')
+                : (floodMode
+                      ? 'Flood advert sent without GPS update'
+                      : 'Direct advert sent without GPS update'),
           );
         }
         return;
       }
 
-      // Get current GPS position
-      Position? position;
-      try {
-        position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            distanceFilter: 0,
-          ),
-        ).timeout(const Duration(seconds: 5));
-      } catch (e) {
+      try {} catch (e) {
         debugPrint('❌ Failed to get GPS position: $e');
         if (context.mounted) {
           ToastLogger.error(
@@ -1310,12 +1344,14 @@ class _HomeScreenState extends State<HomeScreen>
                         const SizedBox(width: 4),
                         GestureDetector(
                           onTap: () async {
-                            await _triggerAdvertFeedback();
+                            debugPrint('[Home] Advert button tapped');
+                            unawaited(_triggerAdvertFeedback());
                             if (!mounted || !context.mounted) return;
                             await _advertiseDevice(context);
                           },
                           onLongPress: () async {
-                            await _triggerAdvertFeedback();
+                            debugPrint('[Home] Advert button long-pressed');
+                            unawaited(_triggerAdvertFeedback());
                             if (!mounted || !context.mounted) return;
 
                             final mode = await _showAdvertModeSheet(context);
@@ -1328,6 +1364,7 @@ class _HomeScreenState extends State<HomeScreen>
                               floodMode: mode == _AdvertMode.flood,
                             );
                           },
+                          behavior: HitTestBehavior.opaque,
                           child: Container(
                             width: isTight ? 38 : 40,
                             height: isTight ? 38 : 40,

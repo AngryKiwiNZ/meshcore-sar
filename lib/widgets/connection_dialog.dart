@@ -1206,6 +1206,9 @@ class _SerialDeviceListState extends State<_SerialDeviceList> {
     setState(() => _isConnecting = true);
     try {
       final connectionProvider = context.read<ConnectionProvider>();
+      if (connectionProvider.isSerialConnectionMode) {
+        await connectionProvider.disconnectSerial();
+      }
       final connection = await _transport.connect(device);
       final success = await connectionProvider.connectSerial(
         service: connection.service,

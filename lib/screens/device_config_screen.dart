@@ -247,14 +247,16 @@ class _DeviceConfigScreenState extends State<DeviceConfigScreen> {
     super.initState();
     _connectionProvider = context.read<ConnectionProvider>();
     _connectionProvider.addListener(_handleConnectionProviderChanged);
-    _gpsStatsTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || _gpsLastFixAgeSeconds == null) return;
-      setState(() {});
-    });
-    _gpsRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!mounted) return;
-      _loadGpsMode();
-    });
+    if (!_connectionProvider.isSerialConnectionMode) {
+      _gpsStatsTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted || _gpsLastFixAgeSeconds == null) return;
+        setState(() {});
+      });
+      _gpsRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (!mounted) return;
+        _loadGpsMode();
+      });
+    }
     final deviceInfo = _connectionProvider.deviceInfo;
 
     _nameController = TextEditingController(
@@ -302,18 +304,21 @@ class _DeviceConfigScreenState extends State<DeviceConfigScreen> {
     _lastAutoDiscoverySignature = _autoDiscoverySignature(deviceInfo);
 
     // Fetch allowed repeat frequencies on open if device supports repeat mode
-    if (deviceInfo.clientRepeat != null &&
+    if (!_connectionProvider.isSerialConnectionMode &&
+        deviceInfo.clientRepeat != null &&
         deviceInfo.allowedRepeatFreqRanges == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         context.read<ConnectionProvider>().getAllowedRepeatFreq();
       });
     }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _connectionProvider.getBatteryAndStorage();
-      unawaited(_connectionProvider.getAutoaddConfig());
-      unawaited(_loadGpsMode());
-    });
+    if (!_connectionProvider.isSerialConnectionMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _connectionProvider.getBatteryAndStorage();
+        unawaited(_connectionProvider.getAutoaddConfig());
+        unawaited(_loadGpsMode());
+      });
+    }
   }
 
   @override
@@ -813,7 +818,11 @@ class _DeviceConfigScreenState extends State<DeviceConfigScreen> {
         bandwidth: _bandwidthToValue(_selectedBandwidth),
         spreadingFactor: _selectedSpreadingFactor,
         codingRate: _selectedCodingRate,
-        repeat: deviceInfo.clientRepeat != null ? _repeatEnabled : null,
+        repeat:
+            !connectionProvider.isSerialConnectionMode &&
+                deviceInfo.clientRepeat != null
+            ? _repeatEnabled
+            : null,
       );
 
       // Save TX power

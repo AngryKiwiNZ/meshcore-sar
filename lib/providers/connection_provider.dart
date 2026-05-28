@@ -109,6 +109,7 @@ class ConnectionProvider with ChangeNotifier {
   /// Current connection mode
   ConnectionMode _connectionMode = ConnectionMode.ble;
   ConnectionMode get connectionMode => _connectionMode;
+  bool get isSerialConnectionMode => _connectionMode == ConnectionMode.usb;
 
   /// TCP host last connected to (for display / reconnection info)
   String? _tcpHost;
@@ -909,6 +910,18 @@ class ConnectionProvider with ChangeNotifier {
       notifyListeners();
       return false;
     }
+
+    _deviceInfo = _deviceInfo.copyWith(
+      connectionState: ConnectionState.connected,
+      lastUpdate: DateTime.now(),
+    );
+    _startAckCleanupTimer();
+    notifyListeners();
+    unawaited(
+      service.refreshDeviceInfo().catchError((e) {
+        debugPrint('⚠️ [Provider] Serial device info refresh failed: $e');
+      }),
+    );
     return true;
   }
 
@@ -2252,7 +2265,7 @@ class ConnectionProvider with ChangeNotifier {
       // Build request data: request type byte + optional params
       final requestData = Uint8List.fromList([
         requestType,
-        if (additionalParams != null) ...additionalParams,
+        ...?additionalParams,
       ]);
 
       await _activeService.sendBinaryRequest(
@@ -2343,6 +2356,23 @@ class ConnectionProvider with ChangeNotifier {
     }
   }
 
+  Future<void> _runConfigCommand(
+    String actionLabel,
+    Future<void> Function() action,
+  ) async {
+    _error = null;
+    try {
+      await action().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () => throw TimeoutException('$actionLabel timed out'),
+      );
+    } catch (e) {
+      _error = '$actionLabel failed: $e';
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   /// Set advertised name
   Future<void> setAdvertName(String name) async {
     if (!_activeService.isConnected) {
@@ -2351,12 +2381,10 @@ class ConnectionProvider with ChangeNotifier {
       return;
     }
 
-    try {
-      await _activeService.setAdvertName(name);
-    } catch (e) {
-      _error = 'Failed to set name: $e';
-      notifyListeners();
-    }
+    await _runConfigCommand(
+      'Set name',
+      () => _activeService.setAdvertName(name),
+    );
   }
 
   /// Set advertised position
@@ -2393,11 +2421,15 @@ class ConnectionProvider with ChangeNotifier {
     if (!_activeService.isConnected) {
       _error = 'Not connected to device';
       notifyListeners();
+      throw Exception(_error);
+    }
+
+    if (_isAdvertInProgress) {
+      debugPrint('[Provider] Ignoring advert request; one is already running');
       return;
     }
 
     try {
-      if (_isAdvertInProgress) return;
       // Throttle rapid advert requests
       final now = DateTime.now();
       if (_lastAdvertRequestedAt != null) {
@@ -2408,11 +2440,16 @@ class ConnectionProvider with ChangeNotifier {
         }
       }
       _isAdvertInProgress = true;
+      debugPrint(
+        '[Provider] Sending ${floodMode ? 'flood' : 'direct'} self advert',
+      );
       await _activeService.sendSelfAdvert(floodMode: floodMode);
       _lastAdvertRequestedAt = DateTime.now();
     } catch (e) {
       _error = 'Failed to send advertisement: $e';
+      debugPrint('[Provider] $_error');
       notifyListeners();
+      rethrow;
     } finally {
       _isAdvertInProgress = false;
     }
@@ -2432,18 +2469,16 @@ class ConnectionProvider with ChangeNotifier {
       return;
     }
 
-    try {
-      await _activeService.setRadioParams(
+    await _runConfigCommand(
+      'Set radio params',
+      () => _activeService.setRadioParams(
         frequency: frequency,
         bandwidth: bandwidth,
         spreadingFactor: spreadingFactor,
         codingRate: codingRate,
         repeat: repeat,
-      );
-    } catch (e) {
-      _error = 'Failed to set radio params: $e';
-      notifyListeners();
-    }
+      ),
+    );
   }
 
   /// Request the list of allowed repeat frequency ranges from the device (firmware v9+)
@@ -2464,12 +2499,10 @@ class ConnectionProvider with ChangeNotifier {
       return;
     }
 
-    try {
-      await _activeService.setTxPower(powerDbm);
-    } catch (e) {
-      _error = 'Failed to set TX power: $e';
-      notifyListeners();
-    }
+    await _runConfigCommand(
+      'Set TX power',
+      () => _activeService.setTxPower(powerDbm),
+    );
   }
 
   /// Set other parameters (telemetry modes, advert location policy)
@@ -2485,23 +2518,21 @@ class ConnectionProvider with ChangeNotifier {
       return;
     }
 
-    try {
-      await _activeService.setOtherParams(
+    await _runConfigCommand(
+      'Set other params',
+      () => _activeService.setOtherParams(
         manualAddContacts: manualAddContacts,
         telemetryModes: telemetryModes,
         advertLocationPolicy: advertLocationPolicy,
         multiAcks: multiAcks,
-      );
-      _deviceInfo = _deviceInfo.copyWith(
-        telemetryModes: telemetryModes,
-        advertLocPolicy: advertLocationPolicy,
-        multiAcks: multiAcks,
-      );
-      notifyListeners();
-    } catch (e) {
-      _error = 'Failed to set other params: $e';
-      notifyListeners();
-    }
+      ),
+    );
+    _deviceInfo = _deviceInfo.copyWith(
+      telemetryModes: telemetryModes,
+      advertLocPolicy: advertLocationPolicy,
+      multiAcks: multiAcks,
+    );
+    notifyListeners();
   }
 
   Future<void> getAutoaddConfig() async {
@@ -2563,28 +2594,26 @@ class ConnectionProvider with ChangeNotifier {
       return;
     }
 
-    try {
-      await _activeService.setAutoaddConfig(
+    await _runConfigCommand(
+      'Set auto-add config',
+      () => _activeService.setAutoaddConfig(
         autoAddUsers: autoAddUsers,
         autoAddRepeaters: autoAddRepeaters,
         autoAddRoomServers: autoAddRoomServers,
         autoAddSensors: autoAddSensors,
         overwriteOldest: overwriteOldest,
         maxHops: maxHops,
-      );
-      _deviceInfo = _deviceInfo.copyWith(
-        autoAddUsers: autoAddUsers,
-        autoAddRepeaters: autoAddRepeaters,
-        autoAddRoomServers: autoAddRoomServers,
-        autoAddSensors: autoAddSensors,
-        autoAddOverwriteOldest: overwriteOldest,
-        autoAddMaxHops: maxHops,
-      );
-      notifyListeners();
-    } catch (e) {
-      _error = 'Failed to set auto-add config: $e';
-      notifyListeners();
-    }
+      ),
+    );
+    _deviceInfo = _deviceInfo.copyWith(
+      autoAddUsers: autoAddUsers,
+      autoAddRepeaters: autoAddRepeaters,
+      autoAddRoomServers: autoAddRoomServers,
+      autoAddSensors: autoAddSensors,
+      autoAddOverwriteOldest: overwriteOldest,
+      autoAddMaxHops: maxHops,
+    );
+    notifyListeners();
   }
 
   Future<void> setPathHashMode(int mode) async {
@@ -2594,14 +2623,12 @@ class ConnectionProvider with ChangeNotifier {
       return;
     }
 
-    try {
-      await _activeService.setPathHashMode(mode);
-      _deviceInfo = _deviceInfo.copyWith(pathHashMode: mode);
-      notifyListeners();
-    } catch (e) {
-      _error = 'Failed to set path hash mode: $e';
-      notifyListeners();
-    }
+    await _runConfigCommand(
+      'Set path hash mode',
+      () => _activeService.setPathHashMode(mode),
+    );
+    _deviceInfo = _deviceInfo.copyWith(pathHashMode: mode);
+    notifyListeners();
   }
 
   /// Export a contact as a meshcore:// share URL.
@@ -2654,13 +2681,15 @@ class ConnectionProvider with ChangeNotifier {
     try {
       // The device query command triggers a SelfInfo response
       await _activeService.refreshDeviceInfo();
-      if (_supportsAutoaddConfig != false) {
+      if (!isSerialConnectionMode && _supportsAutoaddConfig != false) {
         unawaited(getAutoaddConfig());
       }
-      try {
-        await _activeService.getAllowedRepeatFreq();
-      } catch (_) {
-        // Older firmware may not expose repeat frequency ranges.
+      if (!isSerialConnectionMode) {
+        try {
+          await _activeService.getAllowedRepeatFreq();
+        } catch (_) {
+          // Older firmware may not expose repeat frequency ranges.
+        }
       }
     } catch (e) {
       _error = 'Failed to refresh device info: $e';

@@ -159,6 +159,12 @@ class _MeshCoreSarAppState extends State<MeshCoreSarApp> {
   }
 
   Future<void> _checkLocationPermissions() async {
+    if (kIsWeb) {
+      _shouldShowPermissionDialog = false;
+      debugPrint('[Main] Skipping startup location permission dialog on web');
+      return;
+    }
+
     try {
       final permission = await Geolocator.checkPermission();
 

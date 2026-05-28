@@ -2541,6 +2541,16 @@ class AppProvider with ChangeNotifier {
       );
       channelsProvider.prepareForDeviceSync();
 
+      if (connectionProvider.isSerialConnectionMode) {
+        debugPrint(
+          '🔌 [AppProvider] Serial connection detected; skipping automatic bootstrap sync',
+        );
+        _hasCompletedConnectionBootstrap = true;
+        _wasDeviceConnected = connectionProvider.deviceInfo.isConnected;
+        notifyListeners();
+        return;
+      }
+
       // Note: Device clock is automatically synced during connection in MeshCoreBleService
       // No need to sync it again here
 
@@ -2784,6 +2794,9 @@ class AppProvider with ChangeNotifier {
 
   Future<void> refreshChannelLocationSharingState() async {
     if (!connectionProvider.deviceInfo.isConnected) {
+      return;
+    }
+    if (connectionProvider.isSerialConnectionMode) {
       return;
     }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
 
+import 'package:flutter/foundation.dart';
 import 'package:meshcore_client/meshcore_client.dart';
 import 'package:web/web.dart' as web;
 import 'package:webserial/webserial.dart';
@@ -58,6 +59,7 @@ class _WebSerialTransport implements SerialTransport {
     final service = MeshCoreSerialService(appName: 'MeshCore SAR');
     web.ReadableStreamDefaultReader? reader;
     bool keepReading = false;
+    Future<void> writeQueue = Future<void>.value();
 
     try {
       await port
@@ -73,30 +75,32 @@ class _WebSerialTransport implements SerialTransport {
           )
           .toDart;
 
-      await port
-          .setSignals(
-            JSSerialOutputSignals(
-              dataTerminalReady: true,
-              requestToSend: true,
-            ),
-          )
-          .toDart;
+      debugPrint('[WebSerial] Opened');
 
-      service.writeRaw = (data) async {
-        final writable = port.writable;
-        if (writable == null) {
-          throw Exception('Serial port is not writable');
-        }
-        final writer =
-            writable.getWriter() as web.WritableStreamDefaultWriter?;
-        if (writer == null) {
-          throw Exception('Failed to acquire serial writer');
-        }
-        try {
-          await writer.write(data.toJS).toDart;
-        } finally {
-          writer.releaseLock();
-        }
+      service.writeRaw = (data) {
+        final bytes = Uint8List.fromList(data);
+        final queued = writeQueue.catchError((_) {}).then((_) async {
+          debugPrint(
+            '[WebSerial] TX ${bytes.length} bytes: ${_hexPreview(bytes)}',
+          );
+          final writable = port.writable;
+          if (writable == null) {
+            throw Exception('Serial port is not writable');
+          }
+          final writer =
+              writable.getWriter() as web.WritableStreamDefaultWriter?;
+          if (writer == null) {
+            throw Exception('Failed to acquire serial writer');
+          }
+          try {
+            await writer.ready.toDart;
+            await writer.write(bytes.toJS).toDart;
+          } finally {
+            writer.releaseLock();
+          }
+        });
+        writeQueue = queued;
+        return queued;
       };
 
       final readable = port.readable;
@@ -112,6 +116,7 @@ class _WebSerialTransport implements SerialTransport {
       keepReading = true;
       unawaited(_readLoop(reader, service, () => keepReading));
 
+      await Future<void>.delayed(const Duration(seconds: 1));
       final connected = await service.markConnected();
       if (!connected) {
         throw Exception('Serial session initialization failed');
@@ -162,14 +167,18 @@ class _WebSerialTransport implements SerialTransport {
       try {
         final result = await reader.read().toDart;
         if (result.done) {
+          debugPrint('[WebSerial] Reader finished');
           break;
         }
         final value = result.value;
         if (value == null) {
           continue;
         }
-        service.feedRawBytes((value as JSUint8Array).toDart);
-      } catch (_) {
+        final bytes = (value as JSUint8Array).toDart;
+        debugPrint('[WebSerial] RX ${bytes.length} bytes: ${_hexPreview(bytes)}');
+        service.feedRawBytes(bytes);
+      } catch (e) {
+        debugPrint('[WebSerial] Read loop stopped: $e');
         break;
       }
     }
@@ -205,5 +214,14 @@ class _WebSerialTransport implements SerialTransport {
 }
 
 String _hex(int value) => value.toRadixString(16).padLeft(4, '0');
+
+String _hexPreview(List<int> bytes, {int maxBytes = 96}) {
+  final preview = bytes
+      .take(maxBytes)
+      .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+      .join(' ');
+  if (bytes.length <= maxBytes) return preview;
+  return '$preview ...';
+}
 
 SerialTransport createSerialTransportImpl() => _WebSerialTransport();

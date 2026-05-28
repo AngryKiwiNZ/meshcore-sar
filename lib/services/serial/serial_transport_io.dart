@@ -198,8 +198,8 @@ class _IoSerialTransport implements SerialTransport {
       config.stopBits = 1;
       config.parity = SerialPortParity.none;
       config.setFlowControl(SerialPortFlowControl.none);
-      config.dtr = SerialPortDtr.on;
-      config.rts = SerialPortRts.on;
+      config.dtr = SerialPortDtr.off;
+      config.rts = SerialPortRts.off;
       port.config = config;
 
       service.writeRaw = (data) async {

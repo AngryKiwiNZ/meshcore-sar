@@ -495,7 +495,8 @@ class _MessagesTabState extends State<MessagesTab> {
     );
     final allowsEmptyRecipient =
         effectiveType == MessageDestinationPreferences.destinationTypeAll ||
-        (effectiveType == MessageDestinationPreferences.destinationTypeChannel &&
+        (effectiveType ==
+                MessageDestinationPreferences.destinationTypeChannel &&
             effectivePublicKeyHex == null);
     final shouldFallbackToPublicChannel =
         recipient == null && !allowsEmptyRecipient;
@@ -537,7 +538,8 @@ class _MessagesTabState extends State<MessagesTab> {
     final candidates = switch (type) {
       MessageDestinationPreferences.destinationTypeChannel =>
         contactsProvider.channels,
-      MessageDestinationPreferences.destinationTypeRoom => contactsProvider.rooms,
+      MessageDestinationPreferences.destinationTypeRoom =>
+        contactsProvider.rooms,
       MessageDestinationPreferences.destinationTypeContact =>
         contactsProvider.chatContacts,
       _ => contactsProvider.contacts,
@@ -1027,8 +1029,9 @@ class _MessagesTabState extends State<MessagesTab> {
                   final connectionProvider = context.read<ConnectionProvider>();
                   if (_selectedRecipient != null &&
                       connectionProvider.deviceInfo.isConnected) {
-                    await connectionProvider
-                        .setContactDirect(_selectedRecipient!);
+                    await connectionProvider.setContactDirect(
+                      _selectedRecipient!,
+                    );
                   }
                   await _sendMessage();
                 },
@@ -1042,8 +1045,9 @@ class _MessagesTabState extends State<MessagesTab> {
                   final connectionProvider = context.read<ConnectionProvider>();
                   if (_selectedRecipient != null &&
                       connectionProvider.deviceInfo.isConnected) {
-                    await connectionProvider
-                        .resetPath(_selectedRecipient!.publicKey);
+                    await connectionProvider.resetPath(
+                      _selectedRecipient!.publicKey,
+                    );
                   }
                   await _sendMessage();
                 },
@@ -1162,7 +1166,7 @@ class _MessagesTabState extends State<MessagesTab> {
               MessageDestinationPreferences.destinationTypeContact &&
           _selectedRecipient != null &&
           _selectedRecipient!.routeHasPath) {
-        imageDataBytesPerFragment = safeImageDataBytesForPath(
+        imageDataBytesPerFragment = recommendedImageDataBytesForPath(
           _selectedRecipient!.routeHopCount,
         );
       }
@@ -1773,11 +1777,13 @@ class _MessagesTabState extends State<MessagesTab> {
     bool enabled,
   ) async {
     try {
-      final result = await context.read<AppProvider>().setChannelLocationSharingEnabled(
-        channelIdx,
-        enabled,
-        l10n: AppLocalizations.of(context),
-      );
+      final result = await context
+          .read<AppProvider>()
+          .setChannelLocationSharingEnabled(
+            channelIdx,
+            enabled,
+            l10n: AppLocalizations.of(context),
+          );
       if (!mounted) return;
       ToastLogger.success(context, result.message);
     } catch (error) {
@@ -1797,7 +1803,9 @@ class _MessagesTabState extends State<MessagesTab> {
       return;
     }
 
-    final channelIdx = recipient.publicKey.length > 1 ? recipient.publicKey[1] : 0;
+    final channelIdx = recipient.publicKey.length > 1
+        ? recipient.publicKey[1]
+        : 0;
     if (channelIdx <= 0) {
       if (!mounted) return;
       ToastLogger.error(
@@ -1812,7 +1820,10 @@ class _MessagesTabState extends State<MessagesTab> {
           .read<AppProvider>()
           .getChannelLocationSharingState(channelIdx);
       if (!mounted) return;
-      await _setSelectedChannelLocationSharing(channelIdx, !sharingState.isSharing);
+      await _setSelectedChannelLocationSharing(
+        channelIdx,
+        !sharingState.isSharing,
+      );
     } catch (error) {
       if (!mounted) return;
       ToastLogger.error(context, _locationSharingErrorMessage(error));
@@ -1823,9 +1834,9 @@ class _MessagesTabState extends State<MessagesTab> {
     final privateChannelIdx = _selectedPrivateChannelIdx();
     final locationSharingStateFuture = privateChannelIdx == null
         ? null
-        : context
-              .read<AppProvider>()
-              .getChannelLocationSharingState(privateChannelIdx);
+        : context.read<AppProvider>().getChannelLocationSharingState(
+            privateChannelIdx,
+          );
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
@@ -2060,7 +2071,9 @@ class _MessagesTabState extends State<MessagesTab> {
                           controller: searchController,
                           autofocus: true,
                           decoration: InputDecoration(
-                            hintText: AppLocalizations.of(context)!.searchInCurrentFilter,
+                            hintText: AppLocalizations.of(
+                              context,
+                            )!.searchInCurrentFilter,
                             prefixIcon: const Icon(Icons.search),
                             suffixIcon: searchController.text.isEmpty
                                 ? null
@@ -2163,11 +2176,7 @@ class _MessagesTabState extends State<MessagesTab> {
                   border: Border.all(color: Colors.white, width: 1.5),
                 ),
                 alignment: Alignment.center,
-                child: Icon(
-                  Icons.location_pin,
-                  size: 9,
-                  color: Colors.white,
-                ),
+                child: Icon(Icons.location_pin, size: 9, color: Colors.white),
               ),
             ),
         ],

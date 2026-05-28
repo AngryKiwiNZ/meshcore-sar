@@ -5,6 +5,7 @@ const int _cmdSendRawDataOverheadBytes = 2; // cmd + pathLen
 const int _maxMeshPacketPayloadBytes = 184; // MeshCore MAX_PACKET_PAYLOAD
 const int _meshPacketHeaderBytes = 2; // mesh header bytes before path/payload
 const int _imagePacketHeaderBytes = 6; // image packet binary header in payload
+const int _repeaterReliableImageDataBytes = 96;
 const int _defaultLoRaSf = 10; // MeshCore companion defaults (SF10)
 const int _defaultLoRaCr = 5; // MeshCore companion defaults (4/5)
 const int _defaultLoRaBwHz = 250000; // MeshCore companion defaults (250kHz)
@@ -97,7 +98,9 @@ class ImagePacket {
 
   @override
   String toString() {
-    final suffix = total > 0 ? ' ${format.label} [$index/${total - 1}]' : ' [$index]';
+    final suffix = total > 0
+        ? ' ${format.label} [$index/${total - 1}]'
+        : ' [$index]';
     return 'ImagePacket($sessionId$suffix ${data.length}B)';
   }
 }
@@ -127,6 +130,20 @@ int safeImageDataBytesForPath(int pathLen) {
   // Fragments at the absolute 172-byte command-frame limit have proven flaky
   // in practice, so cap to the conservative protocol default.
   return maxData.clamp(1, ImagePacket.maxDataBytes).toInt();
+}
+
+/// Choose an image fragment data size for reliability, not just frame fit.
+///
+/// Smaller fragments cost more overhead, but they reduce airtime per packet and
+/// make multi-hop repeater paths less all-or-nothing when individual LoRa
+/// packets are lost.
+int recommendedImageDataBytesForPath(int pathLen) {
+  final safeLimit = safeImageDataBytesForPath(pathLen);
+  final normalizedPathLen = pathLen.clamp(0, 64).toInt();
+  final reliabilityLimit = normalizedPathLen == 0
+      ? ImagePacket.maxDataBytes
+      : _repeaterReliableImageDataBytes;
+  return safeLimit < reliabilityLimit ? safeLimit : reliabilityLimit;
 }
 
 /// Approximate end-to-end transmit time for image fragments on MeshCore LoRa.

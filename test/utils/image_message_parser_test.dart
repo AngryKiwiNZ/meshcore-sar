@@ -32,7 +32,6 @@ void main() {
       const legacy = 'IE1:deadbeef:0:7:128:128:1050:aabbccddeeff:1700000000:1';
       expect(ImageEnvelope.tryParse(legacy), isNull);
     });
-
   });
 
   group('ImageFetchRequest', () {
@@ -119,6 +118,21 @@ void main() {
         safeImageDataBytesForPath(2),
         lessThanOrEqualTo(ImagePacket.maxDataBytes),
       );
+    });
+  });
+
+  group('recommendedImageDataBytesForPath', () {
+    test('keeps direct image fragments at the conservative default', () {
+      expect(
+        recommendedImageDataBytesForPath(0),
+        equals(ImagePacket.maxDataBytes),
+      );
+    });
+
+    test('uses a fixed smaller image fragment size for repeater paths', () {
+      expect(recommendedImageDataBytesForPath(1), equals(96));
+      expect(recommendedImageDataBytesForPath(2), equals(96));
+      expect(recommendedImageDataBytesForPath(4), equals(96));
     });
   });
 }

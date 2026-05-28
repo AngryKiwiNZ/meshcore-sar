@@ -238,8 +238,10 @@ class AppProvider with ChangeNotifier {
   final Set<String> _pendingDeliveredRouteRefreshContacts = <String>{};
 
   static const Duration _packetRetryDelay = Duration(milliseconds: 1200);
+  static const Duration _imagePacketRetryDelay = Duration(seconds: 3);
   static const Duration _mediaSwarmResponseWindow = Duration(seconds: 10);
   static const int _maxPacketRetryAttempts = 4;
+  static const int _maxImagePacketRetryAttempts = 8;
   final Map<String, String> _voiceSessionSenderKey6 = {};
   final Map<String, String> _imageSessionSenderKey6 = {};
   final Map<String, Map<int, VoicePacket>> _pendingChannelVoicePackets = {};
@@ -3511,7 +3513,7 @@ class AppProvider with ChangeNotifier {
 
     _imageMissingRetryAttempts[sessionId] = 0;
     _imageMissingRetryTimers[sessionId]?.cancel();
-    _imageMissingRetryTimers[sessionId] = Timer(_packetRetryDelay, () {
+    _imageMissingRetryTimers[sessionId] = Timer(_imagePacketRetryDelay, () {
       unawaited(_requestMissingImageFragments(sessionId));
     });
   }
@@ -3600,7 +3602,7 @@ class AppProvider with ChangeNotifier {
     }
 
     final attempt = _imageMissingRetryAttempts[sessionId] ?? 0;
-    if (attempt >= _maxPacketRetryAttempts) {
+    if (attempt >= _maxImagePacketRetryAttempts) {
       debugPrint(
         '⚠️ [AppProvider] Image re-request limit reached for $sessionId',
       );
@@ -3609,10 +3611,22 @@ class AppProvider with ChangeNotifier {
     }
 
     final senderKey6 = _imageSessionSenderKey6[sessionId];
-    if (senderKey6 == null) return;
+    if (senderKey6 == null) {
+      debugPrint(
+        '[AppProvider] Image re-request pending for $sessionId; sender key not available yet',
+      );
+      _rescheduleImageMissingRetry(sessionId, attempt);
+      return;
+    }
     final sender = _resolveContactByPrefixHex(senderKey6);
     final requesterKey6 = _deviceKey6Hex();
-    if (requesterKey6 == null) return;
+    if (requesterKey6 == null) {
+      debugPrint(
+        '[AppProvider] Image re-request pending for $sessionId; local key not available yet',
+      );
+      _rescheduleImageMissingRetry(sessionId, attempt);
+      return;
+    }
 
     final missing = imageProvider.missingFragmentIndices(sessionId);
     if (missing.isEmpty) {
@@ -3620,9 +3634,15 @@ class AppProvider with ChangeNotifier {
       return;
     }
 
+    debugPrint(
+      '[AppProvider] Image re-request ${attempt + 1}/$_maxImagePacketRetryAttempts for $sessionId: ${missing.length} missing fragment(s)',
+    );
+
     var sent = false;
     if (sender != null) {
-      final routeOk = await verifyRawTransportRoute(sender);
+      final routeOk = sender.routeHopCount == 0
+          ? true
+          : await verifyRawTransportRoute(sender);
       if (routeOk) {
         sent = await _sendDirectMediaFetchRequest(
           mediaType: 'image',
@@ -3632,6 +3652,10 @@ class AppProvider with ChangeNotifier {
           missingIndices: missing.toSet(),
         );
       }
+    } else {
+      debugPrint(
+        '[AppProvider] Image re-request could not resolve sender $senderKey6; trying swarm',
+      );
     }
     if (!sent) {
       sent = await _requestMissingMediaViaSwarm(
@@ -3642,12 +3666,20 @@ class AppProvider with ChangeNotifier {
       );
     }
     if (!sent) {
+      debugPrint(
+        '[AppProvider] Image re-request could not be sent for $sessionId; retrying later',
+      );
+      _rescheduleImageMissingRetry(sessionId, attempt);
       return;
     }
 
-    _imageMissingRetryAttempts[sessionId] = attempt + 1;
+    _rescheduleImageMissingRetry(sessionId, attempt);
+  }
+
+  void _rescheduleImageMissingRetry(String sessionId, int previousAttempt) {
+    _imageMissingRetryAttempts[sessionId] = previousAttempt + 1;
     _imageMissingRetryTimers[sessionId]?.cancel();
-    _imageMissingRetryTimers[sessionId] = Timer(_packetRetryDelay, () {
+    _imageMissingRetryTimers[sessionId] = Timer(_imagePacketRetryDelay, () {
       unawaited(_requestMissingImageFragments(sessionId));
     });
   }

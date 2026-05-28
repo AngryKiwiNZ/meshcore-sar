@@ -19,6 +19,34 @@ It uses the MeshCore protocol over LoRa for long-range, infrastructure-free comm
 
 This is a forked Repo and has been repaired so that Photo and Audio files successfully send using companion firmware 1.15 as of May 2026.
 
+## Current Test Build
+
+Android test build: `2026.0529.1+57`
+
+This version includes the latest image-transfer reliability work:
+
+- Automatic image gap recovery now keeps retrying missing fragments instead of stopping after a single failed request path.
+- Direct image recovery no longer depends on a raw route probe when the sender is directly reachable.
+- Image retry timing is more patient: missing fragments are requested every 3 seconds, up to 8 attempts.
+- Missing image fragments can still be fetched from swarm peers that have already received the same session.
+- Direct image sends keep full-size `152B` image fragments for best speed.
+- Repeater-routed image sends use fixed `96B` image fragments for safer traversal through repeaters.
+- The fragment sizing is chosen when the image is first sent, so all peers share the same session/fragment map for swarm recovery.
+
+### Android Build Command
+
+Use this command for the matching GitHub/local Android APK build:
+
+```bash
+flutter build apk --release --build-name 2026.0529.1 --build-number 57
+```
+
+The APK output is:
+
+```text
+build/app/outputs/flutter-apk/app-release.apk
+```
+
 ## Highlights
 
 - Rapid mesh chat for both 1:1 and group coordination

@@ -2,6 +2,10 @@ name: Build And Upload Release Assets
 
 on:
   push:
+    branches:
+      - main
+    tags:
+      - "v*"
   release:
     types: [published]
   workflow_dispatch:

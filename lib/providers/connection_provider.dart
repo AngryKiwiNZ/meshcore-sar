@@ -2473,12 +2473,31 @@ class ConnectionProvider with ChangeNotifier {
       'Set radio params',
       () => _activeService.setRadioParams(
         frequency: frequency,
-        bandwidth: bandwidth,
+        bandwidth: _radioBandwidthToHz(bandwidth),
         spreadingFactor: spreadingFactor,
         codingRate: codingRate,
         repeat: repeat,
       ),
     );
+  }
+
+  int _radioBandwidthToHz(int bandwidth) {
+    if (bandwidth > 1000) {
+      return bandwidth;
+    }
+    return switch (bandwidth) {
+      0 => 7800,
+      1 => 10400,
+      2 => 15600,
+      3 => 20800,
+      4 => 31250,
+      5 => 41700,
+      6 => 62500,
+      7 => 125000,
+      8 => 250000,
+      9 => 500000,
+      _ => bandwidth,
+    };
   }
 
   /// Request the list of allowed repeat frequency ranges from the device (firmware v9+)

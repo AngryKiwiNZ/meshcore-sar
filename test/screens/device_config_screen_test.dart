@@ -17,6 +17,9 @@ class _FakeConnectionProvider extends ChangeNotifier
   @override
   device_info.DeviceInfo get deviceInfo => _deviceInfo;
 
+  @override
+  bool get isSerialConnectionMode => true;
+
   void updateDeviceInfo(device_info.DeviceInfo nextDeviceInfo) {
     _deviceInfo = nextDeviceInfo;
     notifyListeners();
@@ -71,57 +74,55 @@ Future<void> _pumpDeviceConfigScreen(
 }
 
 void main() {
-  testWidgets(
-    'matches a preset when bandwidth arrives as raw Hz',
-    (tester) async {
-      final connectionProvider = _FakeConnectionProvider(
-        device_info.DeviceInfo(
-          connectionState: device_info.ConnectionState.connected,
-          radioFreq: 869618,
-          radioBw: 62500,
-          radioSf: 8,
-          radioCr: 8,
-        ),
-      );
+  testWidgets('matches a preset when bandwidth arrives as raw Hz', (
+    tester,
+  ) async {
+    final connectionProvider = _FakeConnectionProvider(
+      device_info.DeviceInfo(
+        connectionState: device_info.ConnectionState.connected,
+        radioFreq: 869618,
+        radioBw: 62500,
+        radioSf: 8,
+        radioCr: 8,
+      ),
+    );
 
-      await _pumpDeviceConfigScreen(
-        tester,
-        connectionProvider: connectionProvider,
-      );
+    await _pumpDeviceConfigScreen(
+      tester,
+      connectionProvider: connectionProvider,
+    );
 
-      expect(find.byKey(const ValueKey('eu_uk_narrow')), findsOneWidget);
-      expect(find.text('EU/UK (Narrow)'), findsWidgets);
-    },
-  );
+    expect(find.byKey(const ValueKey('eu_uk_narrow')), findsOneWidget);
+    expect(find.text('EU/UK (Narrow)'), findsWidgets);
+  });
 
-  testWidgets(
-    're-syncs the preset dropdown when device info changes',
-    (tester) async {
-      final connectionProvider = _FakeConnectionProvider(
-        device_info.DeviceInfo(
-          connectionState: device_info.ConnectionState.connected,
-        ),
-      );
+  testWidgets('re-syncs the preset dropdown when device info changes', (
+    tester,
+  ) async {
+    final connectionProvider = _FakeConnectionProvider(
+      device_info.DeviceInfo(
+        connectionState: device_info.ConnectionState.connected,
+      ),
+    );
 
-      await _pumpDeviceConfigScreen(
-        tester,
-        connectionProvider: connectionProvider,
-      );
+    await _pumpDeviceConfigScreen(
+      tester,
+      connectionProvider: connectionProvider,
+    );
 
-      expect(find.byKey(const ValueKey('custom')), findsOneWidget);
+    expect(find.byKey(const ValueKey('custom')), findsOneWidget);
 
-      connectionProvider.updateDeviceInfo(
-        device_info.DeviceInfo(
-          connectionState: device_info.ConnectionState.connected,
-          radioFreq: 869618,
-          radioBw: 62500,
-          radioSf: 8,
-          radioCr: 8,
-        ),
-      );
-      await tester.pump();
+    connectionProvider.updateDeviceInfo(
+      device_info.DeviceInfo(
+        connectionState: device_info.ConnectionState.connected,
+        radioFreq: 869618,
+        radioBw: 62500,
+        radioSf: 8,
+        radioCr: 8,
+      ),
+    );
+    await tester.pump();
 
-      expect(find.byKey(const ValueKey('eu_uk_narrow')), findsOneWidget);
-    },
-  );
+    expect(find.byKey(const ValueKey('eu_uk_narrow')), findsOneWidget);
+  });
 }

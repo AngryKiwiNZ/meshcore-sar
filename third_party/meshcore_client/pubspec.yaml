@@ -1,0 +1,21 @@
+name: meshcore_client
+description: MeshCore BLE companion protocol client library
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_blue_plus: ^2.0.0
+  flutter_blue_plus_platform_interface: ^8.2.1
+  latlong2: ^0.9.0
+  characters: ^1.4.0
+  crypto: ^3.0.3
+  pointycastle: ^4.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter

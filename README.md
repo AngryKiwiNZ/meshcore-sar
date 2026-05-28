@@ -32,6 +32,7 @@ This version includes the latest image-transfer reliability work:
 - Direct image sends keep full-size `152B` image fragments for best speed.
 - Repeater-routed image sends use fixed `96B` image fragments for safer traversal through repeaters.
 - The fragment sizing is chosen when the image is first sent, so all peers share the same session/fragment map for swarm recovery.
+- Radio preset saving now sends bandwidth as raw Hz, matching companion firmware 1.15. This fixes saving `New Zealand (Narrow)` at `917.375 MHz, BW 62.5 kHz, SF7, CR5`.
 
 ### Android Build Command
 

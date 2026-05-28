@@ -1854,15 +1854,17 @@ class ConnectionProvider with ChangeNotifier {
     final rawPath = shouldNormalizeEncodedPath
         ? (legacyRawPath ?? Uint8List(0))
         : contactPath;
-    final rawPathPreview = rawPath
-        .take(rawPathLen.clamp(0, rawPath.length))
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join();
-    debugPrint(
-      '📤 [RawTX] cmd=0x19 descriptor=0x${descriptor.toRadixString(16).padLeft(2, '0')} '
-      'hops=$hopCount hashSize=$hashSize pathBytes=$pathByteLen '
-      'rawLen=$rawPathLen payload=${payload.length} path=$rawPathPreview',
-    );
+    if (kDebugMode) {
+      final rawPathPreview = rawPath
+          .take(rawPathLen.clamp(0, rawPath.length))
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
+      debugPrint(
+        '📤 [RawTX] cmd=0x19 descriptor=0x${descriptor.toRadixString(16).padLeft(2, '0')} '
+        'hops=$hopCount hashSize=$hashSize pathBytes=$pathByteLen '
+        'rawLen=$rawPathLen payload=${payload.length} path=$rawPathPreview',
+      );
+    }
     await _activeService.sendRawVoicePacket(
       contactPathLen: rawPathLen,
       contactPath: rawPath,

@@ -244,6 +244,7 @@ class AppProvider with ChangeNotifier {
   static const int _maxImagePacketRetryAttempts = 8;
   final Map<String, String> _voiceSessionSenderKey6 = {};
   final Map<String, String> _imageSessionSenderKey6 = {};
+  final Map<String, String> _activeImageFetchTargetKey6 = {};
   final Map<String, Map<int, VoicePacket>> _pendingChannelVoicePackets = {};
   final Map<String, Map<int, ImagePacket>> _pendingChannelImageFragments = {};
   final Map<String, Timer> _voiceMissingRetryTimers = {};
@@ -253,8 +254,11 @@ class AppProvider with ChangeNotifier {
   bool _hardwareChannelLocationSharingSupported = false;
   int? _hardwareChannelLocationSharingChannelIdx;
   final FragmentAckWaitRegistry _rawProbeWaiters = FragmentAckWaitRegistry();
+  final FragmentAckWaitRegistry _imageFragmentAckWaiters =
+      FragmentAckWaitRegistry();
   final Map<String, Future<bool>> _pendingRawRouteProbes = {};
   final Map<String, Future<bool>> _pendingMediaSwarmFetches = {};
+  final Set<String> _sentImageCompletionAcks = <String>{};
   final Map<String, Map<String, MediaSwarmAvailability>>
   _pendingMediaSwarmResponses = {};
   final Map<String, DateTime> _recentRepeaterStatusRequests = {};
@@ -1015,6 +1019,7 @@ class AppProvider with ChangeNotifier {
             payload: payload,
           );
         };
+    imageProvider.waitForFragmentAckCallback = _waitForImageFragmentAck;
     // When a contact is received from BLE
     connectionProvider.onContactReceivedDetailed = (contact, source) {
       final devicePublicKey = connectionProvider.deviceInfo.publicKey;
@@ -1514,6 +1519,18 @@ class AppProvider with ChangeNotifier {
           '📡 [AppProvider] Incoming raw route probe ACK: nonce=${rawProbeAck.nonce.toRadixString(16)}',
         );
         _completeRawRouteProbeAck(rawProbeAck.nonce);
+        return;
+      }
+
+      final imageFragmentAck = ImageFragmentAck.tryParseBinary(payload);
+      if (imageFragmentAck != null) {
+        _completeImageFragmentAck(imageFragmentAck);
+        return;
+      }
+
+      final imageSessionAck = ImageSessionAck.tryParseBinary(payload);
+      if (imageSessionAck != null) {
+        _handleIncomingImageSessionAck(imageSessionAck);
         return;
       }
 
@@ -3469,6 +3486,9 @@ class AppProvider with ChangeNotifier {
         contactPathLen: target.routeEncodedPathLen,
         payload: payload,
       );
+      if (mediaType == 'image') {
+        noteActiveImageFetchTarget(sessionId, target);
+      }
       return true;
     } catch (e) {
       debugPrint(
@@ -3745,10 +3765,16 @@ class AppProvider with ChangeNotifier {
       width: session?.width ?? 0,
       height: session?.height ?? 0,
     );
-    _scheduleImageMissingRetry(
-      frag.sessionId,
-      justComplete: imageProvider.isComplete(frag.sessionId),
+    final justComplete = imageProvider.isComplete(frag.sessionId);
+    unawaited(
+      _sendImageFragmentAck(sessionId: frag.sessionId, index: frag.index),
     );
+    _scheduleImageMissingRetry(frag.sessionId, justComplete: justComplete);
+    if (justComplete) {
+      _clearImageMissingRetry(frag.sessionId);
+      _activeImageFetchTargetKey6.remove(frag.sessionId);
+      unawaited(_sendImageSessionAck(frag.sessionId));
+    }
     return true;
   }
 
@@ -3844,10 +3870,19 @@ class AppProvider with ChangeNotifier {
         width: session.width,
         height: session.height,
       );
-      _scheduleImageMissingRetry(
-        sessionId,
-        justComplete: imageProvider.isComplete(sessionId),
+      final justComplete = imageProvider.isComplete(sessionId);
+      unawaited(
+        _sendImageFragmentAck(
+          sessionId: normalizedFragment.sessionId,
+          index: normalizedFragment.index,
+        ),
       );
+      _scheduleImageMissingRetry(sessionId, justComplete: justComplete);
+      if (justComplete) {
+        _clearImageMissingRetry(sessionId);
+        _activeImageFetchTargetKey6.remove(sessionId);
+        unawaited(_sendImageSessionAck(sessionId));
+      }
     }
   }
 
@@ -3889,6 +3924,139 @@ class AppProvider with ChangeNotifier {
       voiceId: sessionId,
     );
     messagesProvider.addMessage(placeholder, contactLookup: (_) => '');
+  }
+
+  void noteActiveImageFetchTarget(String sessionId, Contact target) {
+    if (target.publicKey.length < 6) {
+      return;
+    }
+    _activeImageFetchTargetKey6[sessionId] = target.publicKey
+        .sublist(0, 6)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toLowerCase();
+  }
+
+  String _imageFragmentAckKey(String sessionId, int index) =>
+      '$sessionId:$index';
+
+  Future<bool> _waitForImageFragmentAck(String sessionId, int index) {
+    return _imageFragmentAckWaiters.waitFor(
+      _imageFragmentAckKey(sessionId, index),
+      timeout: const Duration(seconds: 8),
+    );
+  }
+
+  void _completeImageFragmentAck(ImageFragmentAck ack) {
+    final completed = _imageFragmentAckWaiters.complete(
+      _imageFragmentAckKey(ack.sessionId, ack.index),
+    );
+    if (completed > 0) {
+      debugPrint(
+        '📷 [AppProvider] Image fragment ACK received: ${ack.sessionId}#${ack.index} ($completed waiter(s))',
+      );
+    }
+  }
+
+  Future<void> _sendImageFragmentAck({
+    required String sessionId,
+    required int index,
+  }) async {
+    final requesterKey6 = _deviceKey6Hex();
+    if (requesterKey6 == null) {
+      return;
+    }
+    final targetKey6 =
+        _activeImageFetchTargetKey6[sessionId] ?? _imageSessionSenderKey6[sessionId];
+    if (targetKey6 == null) {
+      return;
+    }
+    final target = _resolveContactByPrefixHex(targetKey6);
+    if (target == null ||
+        !target.routeHasPath ||
+        target.routeHopCount > _maxDirectPayloadHops ||
+        (target.routeHopCount > 0 && target.outPath.isEmpty)) {
+      return;
+    }
+
+    try {
+      await connectionProvider.sendRawVoicePacket(
+        contactPath: target.outPath,
+        contactPathLen: target.routeEncodedPathLen,
+        payload: ImageFragmentAck(
+          sessionId: sessionId,
+          index: index,
+          requesterKey6: requesterKey6,
+        ).encodeBinary(),
+      );
+    } catch (e) {
+      debugPrint(
+        '⚠️ [AppProvider] Failed to send image fragment ACK for $sessionId#$index: $e',
+      );
+    }
+  }
+
+  Future<void> _sendImageSessionAck(String sessionId) async {
+    final requesterKey6 = _deviceKey6Hex();
+    if (requesterKey6 == null) {
+      return;
+    }
+    final targets = <String>{
+      if (_activeImageFetchTargetKey6[sessionId] != null)
+        _activeImageFetchTargetKey6[sessionId]!,
+      if (_imageSessionSenderKey6[sessionId] != null)
+        _imageSessionSenderKey6[sessionId]!,
+    };
+    if (targets.isEmpty) {
+      return;
+    }
+
+    final dedupeKey = '$sessionId:$requesterKey6';
+    if (_sentImageCompletionAcks.contains(dedupeKey)) {
+      return;
+    }
+
+    var sent = false;
+    for (final targetKey6 in targets) {
+      final target = _resolveContactByPrefixHex(targetKey6);
+      if (target == null ||
+          !target.routeHasPath ||
+          target.routeHopCount > _maxDirectPayloadHops ||
+          (target.routeHopCount > 0 && target.outPath.isEmpty)) {
+        continue;
+      }
+      try {
+        await connectionProvider.sendRawVoicePacket(
+          contactPath: target.outPath,
+          contactPathLen: target.routeEncodedPathLen,
+          payload: ImageSessionAck(
+            sessionId: sessionId,
+            requesterKey6: requesterKey6,
+          ).encodeBinary(),
+        );
+        sent = true;
+      } catch (e) {
+        debugPrint(
+          '⚠️ [AppProvider] Failed to send image session ACK for $sessionId to ${target.advName}: $e',
+        );
+      }
+    }
+    if (sent) {
+      _sentImageCompletionAcks.add(dedupeKey);
+    }
+  }
+
+  void _handleIncomingImageSessionAck(ImageSessionAck ack) {
+    final requester = _resolveContactByPrefixHex(ack.requesterKey6);
+    debugPrint(
+      '[AppProvider] Image session complete: ${ack.sessionId} received by ${requester?.advName ?? ack.requesterKey6}',
+    );
+    messagesProvider.recordMediaCompletion(
+      sessionId: ack.sessionId,
+      mediaType: 'image',
+      requesterKey6: ack.requesterKey6,
+      requesterName: requester?.advName,
+    );
   }
 
   String _rawProbeKey(int nonce) =>
@@ -4293,6 +4461,8 @@ class AppProvider with ChangeNotifier {
     _imageMissingRetryAttempts.clear();
     _voiceSessionSenderKey6.clear();
     _imageSessionSenderKey6.clear();
+    _activeImageFetchTargetKey6.clear();
+    _sentImageCompletionAcks.clear();
     _pendingChannelVoicePackets.clear();
     _pendingChannelImageFragments.clear();
     _lowBatteryNotifiedNodeIds.clear();
@@ -4404,9 +4574,12 @@ class AppProvider with ChangeNotifier {
     for (final timer in _imageMissingRetryTimers.values) {
       timer.cancel();
     }
+    _activeImageFetchTargetKey6.clear();
+    _sentImageCompletionAcks.clear();
     _pendingChannelVoicePackets.clear();
     _pendingChannelImageFragments.clear();
     trafficStatsReportingService.dispose();
     super.dispose();
   }
 }
+

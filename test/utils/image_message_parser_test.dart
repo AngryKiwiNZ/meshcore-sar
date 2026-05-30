@@ -106,6 +106,38 @@ void main() {
       expect(parsed!.sessionId, equals('01020304'));
       expect(parsed.index, equals(9));
     });
+
+    test('preserves requester key when present in binary ack', () {
+      final ack = ImageFragmentAck(
+        sessionId: '01020304',
+        index: 9,
+        requesterKey6: 'ffeeddccbbaa',
+      );
+      final payload = ack.encodeBinary();
+      final parsed = ImageFragmentAck.tryParseBinary(payload);
+
+      expect(parsed, isNotNull);
+      expect(parsed!.sessionId, equals('01020304'));
+      expect(parsed.index, equals(9));
+      expect(parsed.requesterKey6, equals('ffeeddccbbaa'));
+    });
+  });
+
+  group('ImageSessionAck', () {
+    test('encodes and parses binary session ack', () {
+      final ack = ImageSessionAck(
+        sessionId: '01020304',
+        requesterKey6: 'ffeeddccbbaa',
+      );
+
+      final payload = ack.encodeBinary();
+      expect(ImageSessionAck.isImageSessionAckBinary(payload), isTrue);
+
+      final parsed = ImageSessionAck.tryParseBinary(payload);
+      expect(parsed, isNotNull);
+      expect(parsed!.sessionId, equals('01020304'));
+      expect(parsed.requesterKey6, equals('ffeeddccbbaa'));
+    });
   });
 
   group('safeImageDataBytesForPath', () {

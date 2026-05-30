@@ -1790,6 +1790,18 @@ class MessagesProvider with ChangeNotifier {
     return _messageTransferDetails[messageId]?.totalTransfers ?? 0;
   }
 
+  int completedTransferCountForSession({
+    String? voiceSessionId,
+    String? imageSessionId,
+  }) {
+    final messageId = _findMessageIdByMediaSession(
+      voiceSessionId: voiceSessionId,
+      imageSessionId: imageSessionId,
+    );
+    if (messageId == null) return 0;
+    return _messageTransferDetails[messageId]?.totalCompletedTransfers ?? 0;
+  }
+
   void recordMediaTransfer({
     required String sessionId,
     required String mediaType,
@@ -1811,6 +1823,34 @@ class MessagesProvider with ChangeNotifier {
         _messageTransferDetails[messageId] ??
         const MessageTransferDetails.empty();
     _messageTransferDetails[messageId] = current.registerTransfer(
+      requesterKey6: requesterKey6,
+      requesterName: requesterName,
+    );
+    _persistMessages();
+    notifyListeners();
+  }
+
+  void recordMediaCompletion({
+    required String sessionId,
+    required String mediaType,
+    required String requesterKey6,
+    String? requesterName,
+  }) {
+    final messageId = _findMessageIdByMediaSession(
+      voiceSessionId: mediaType == 'voice' ? sessionId : null,
+      imageSessionId: mediaType == 'image' ? sessionId : null,
+    );
+    if (messageId == null) {
+      debugPrint(
+        '⚠️ [MessagesProvider] No message found for completed $mediaType session $sessionId',
+      );
+      return;
+    }
+
+    final current =
+        _messageTransferDetails[messageId] ??
+        const MessageTransferDetails.empty();
+    _messageTransferDetails[messageId] = current.registerCompletion(
       requesterKey6: requesterKey6,
       requesterName: requesterName,
     );

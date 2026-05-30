@@ -11,9 +11,24 @@ Contact _buildRequester() {
     publicKey: Uint8List.fromList(List<int>.generate(32, (i) => i)),
     type: ContactType.chat,
     flags: 0,
-    outPathLen: 1,
-    outPath: Uint8List.fromList([1, 2, 3, 4]),
+    outPathLen: 0,
+    outPath: Uint8List(0),
     advName: 'Requester',
+    lastAdvert: 1700000000,
+    advLat: 0,
+    advLon: 0,
+    lastMod: 1700000000,
+  );
+}
+
+Contact _buildRelayedRequester() {
+  return Contact(
+    publicKey: Uint8List.fromList(List<int>.generate(32, (i) => i)),
+    type: ContactType.chat,
+    flags: 0,
+    outPathLen: 2,
+    outPath: Uint8List.fromList([1, 2, 3, 4]),
+    advName: 'Relayed requester',
     lastAdvert: 1700000000,
     advLat: 0,
     advLon: 0,
@@ -85,6 +100,51 @@ void main() {
       expect(provider.availableFragmentIndices('deadbeef'), [0, 2]);
       expect(sent, hasLength(1));
       expect(ImagePacket.tryParseBinary(sent.single)?.index, 2);
+    });
+
+    test('repeats requested fragments for relayed recovery fetches', () async {
+      final provider = ImageProvider();
+      provider.registerEnvelope(
+        const ImageEnvelope(
+          sessionId: 'deadbeef',
+          format: ImageFormat.avif,
+          total: 3,
+          width: 64,
+          height: 64,
+          sizeBytes: 300,
+        ),
+      );
+
+      provider.addFragment(
+        ImagePacket(
+          sessionId: 'deadbeef',
+          format: ImageFormat.avif,
+          index: 1,
+          total: 3,
+          data: Uint8List.fromList([4, 5]),
+        ),
+        width: 64,
+        height: 64,
+      );
+
+      final sentIndexes = <int>[];
+      provider.sendRawPacketCallback =
+          ({
+            required contactPath,
+            required contactPathLen,
+            required payload,
+          }) async {
+            sentIndexes.add(ImagePacket.tryParseBinary(payload)!.index);
+          };
+
+      final ok = await provider.serveSessionTo(
+        sessionId: 'deadbeef',
+        requester: _buildRelayedRequester(),
+        requestedIndices: {1},
+      );
+
+      expect(ok, isTrue);
+      expect(sentIndexes, [1, 1, 1]);
     });
   });
 }

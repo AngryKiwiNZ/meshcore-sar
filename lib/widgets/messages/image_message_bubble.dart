@@ -69,6 +69,11 @@ class _ImageMessageBubbleState extends State<ImageMessageBubble> {
             imageSessionId: envelope.sessionId,
           ),
         );
+        final completedTransferCount = context.select<MessagesProvider, int>(
+          (provider) => provider.completedTransferCountForSession(
+            imageSessionId: envelope.sessionId,
+          ),
+        );
         final contactsProvider = context.read<ContactsProvider>();
         final session = imageProvider.session(envelope.sessionId);
         final sender = TransmissionTargetResolver.resolveLocalTarget(
@@ -145,23 +150,42 @@ class _ImageMessageBubbleState extends State<ImageMessageBubble> {
                 const SizedBox(height: 4),
                 // Status line
                 Text(
-                  _statusText(
-                    isComplete: isComplete,
-                    isRequesting: _isRequesting,
-                    isReceivingData: isReceivingData,
-                    isPartialRequest: _isPartialRequest,
-                    received: received,
-                    total: total,
-                    envelope: envelope,
-                    radioBw: radioBw,
-                    radioSf: radioSf,
-                    radioCr: radioCr,
-                    error: _errorText,
-                    isSentByMe: widget.isSentByMe,
-                    eta: eta,
-                    pathLen: effectivePathLen,
-                    transferCount: transferCount,
-                  ),
+                  widget.isSentByMe
+                      ? _senderStatusText(
+                          isComplete: isComplete,
+                          isRequesting: _isRequesting,
+                          isReceivingData: isReceivingData,
+                          isPartialRequest: _isPartialRequest,
+                          received: received,
+                          total: total,
+                          envelope: envelope,
+                          radioBw: radioBw,
+                          radioSf: radioSf,
+                          radioCr: radioCr,
+                          error: _errorText,
+                          eta: eta,
+                          pathLen: effectivePathLen,
+                          transferCount: transferCount,
+                          completedTransferCount: completedTransferCount,
+                        )
+                      : _statusText(
+                          isComplete: isComplete,
+                          isRequesting: _isRequesting,
+                          isReceivingData: isReceivingData,
+                          isPartialRequest: _isPartialRequest,
+                          received: received,
+                          total: total,
+                          envelope: envelope,
+                          radioBw: radioBw,
+                          radioSf: radioSf,
+                          radioCr: radioCr,
+                          error: _errorText,
+                          isSentByMe: widget.isSentByMe,
+                          eta: eta,
+                          pathLen: effectivePathLen,
+                          transferCount: transferCount,
+                          completedTransferCount: completedTransferCount,
+                        ),
                   style: TextStyle(
                     fontSize: 11,
                     color: Theme.of(
@@ -454,6 +478,10 @@ class _ImageMessageBubbleState extends State<ImageMessageBubble> {
       debugPrint(
         '📷 [ImageMessageBubble] Outgoing image fetch request: session=${envelope.sessionId} want=${isPartialResume ? 'missing' : 'all'} target=${sender.advName} hops=${sender.routeHopCount}',
       );
+      context.read<AppProvider>().noteActiveImageFetchTarget(
+        envelope.sessionId,
+        sender,
+      );
       await conn.sendRawVoicePacket(
         contactPath: sender.outPath,
         contactPathLen: sender.routeEncodedPathLen,
@@ -565,6 +593,7 @@ class _ImageMessageBubbleState extends State<ImageMessageBubble> {
     required bool isSentByMe,
     required Duration? eta,
     required int transferCount,
+    required int completedTransferCount,
   }) {
     final txEstimate = estimateImageTransmitDuration(
       fragmentCount: envelope.total,
@@ -605,6 +634,61 @@ class _ImageMessageBubbleState extends State<ImageMessageBubble> {
     final minutes = value.inMinutes;
     final seconds = value.inSeconds % 60;
     return '~${minutes}m ${seconds}s tx';
+  }
+
+  static String _senderStatusText({
+    required bool isComplete,
+    required bool isRequesting,
+    required bool isReceivingData,
+    required bool isPartialRequest,
+    required int received,
+    required int total,
+    required ImageEnvelope envelope,
+    required int pathLen,
+    required int? radioBw,
+    required int? radioSf,
+    required int? radioCr,
+    required String? error,
+    required Duration? eta,
+    required int transferCount,
+    required int completedTransferCount,
+  }) {
+    final txEstimate = estimateImageTransmitDuration(
+      fragmentCount: envelope.total,
+      sizeBytes: envelope.sizeBytes,
+      pathLen: pathLen,
+      radioBw: radioBw,
+      radioSf: radioSf,
+      radioCr: radioCr,
+    );
+    final txEstimateLabel = _formatTransmitEstimate(txEstimate);
+    final transferLabel = _formatTransferCount(transferCount);
+    final completionLabel = _formatCompletionCount(completedTransferCount);
+
+    if (error != null) return error;
+    if (isRequesting) {
+      final etaLabel = _formatEta(eta);
+      final actionLabel = isPartialRequest
+          ? 'Fetching missing fragments...'
+          : 'Loading...';
+      return '$actionLabel $received/$total - $etaLabel - $txEstimateLabel';
+    }
+    if (isReceivingData) {
+      final etaLabel = _formatEta(eta);
+      return 'Receiving... $received/$total - $etaLabel - $txEstimateLabel';
+    }
+    final base =
+        'Image ${envelope.width}x${envelope.height} ${envelope.format.label}';
+    if (isComplete) {
+      return '$base - ${envelope.total} seg - $transferLabel - $completionLabel - $txEstimateLabel';
+    }
+    return '$base - $transferLabel - $completionLabel - $txEstimateLabel';
+  }
+
+  static String _formatCompletionCount(int count) {
+    if (count <= 0) return 'awaiting receipt';
+    if (count == 1) return 'received once';
+    return 'received $count times';
   }
 
   static String _formatEta(Duration? eta) {

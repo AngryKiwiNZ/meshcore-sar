@@ -471,17 +471,24 @@ class ImageFetchRequest {
 /// Per-fragment ACK for raw image payload packets.
 ///
 /// Binary format:
-///   [0x6a 'j'][sessionId:4B][index:1B]
+///   legacy: [0x6a 'j'][sessionId:4B][index:1B]
+///   v2:     [0x6a 'j'][sessionId:4B][index:1B][requesterKey6:6B]
 class ImageFragmentAck {
   static const int _binaryMagic = 0x6a; // 'j'
 
   final String sessionId; // 8 hex chars
   final int index; // 0..254
+  final String? requesterKey6; // optional 12 hex chars
 
-  const ImageFragmentAck({required this.sessionId, required this.index});
+  const ImageFragmentAck({
+    required this.sessionId,
+    required this.index,
+    this.requesterKey6,
+  });
 
   static bool isImageFragmentAckBinary(Uint8List payload) =>
-      payload.length == 6 && payload[0] == _binaryMagic;
+      (payload.length == 6 || payload.length == 12) &&
+      payload[0] == _binaryMagic;
 
   static ImageFragmentAck? tryParseBinary(Uint8List payload) {
     if (!isImageFragmentAckBinary(payload)) return null;
@@ -492,7 +499,18 @@ class ImageFragmentAck {
           .join()
           .toLowerCase();
       final idx = payload[5];
-      return ImageFragmentAck(sessionId: sid, index: idx);
+      final requesterKey6 = payload.length == 12
+          ? payload
+                .sublist(6, 12)
+                .map((b) => b.toRadixString(16).padLeft(2, '0'))
+                .join()
+                .toLowerCase()
+          : null;
+      return ImageFragmentAck(
+        sessionId: sid,
+        index: idx,
+        requesterKey6: requesterKey6,
+      );
     } catch (_) {
       return null;
     }
@@ -505,12 +523,92 @@ class ImageFragmentAck {
     if (index < 0 || index > 254) {
       throw ArgumentError.value(index, 'index', 'Expected 0..254');
     }
-    final out = Uint8List(6);
+    if (requesterKey6 != null &&
+        !RegExp(r'^[0-9a-fA-F]{12}$').hasMatch(requesterKey6!)) {
+      throw ArgumentError.value(
+        requesterKey6,
+        'requesterKey6',
+        'Expected 12 hex chars',
+      );
+    }
+    final out = Uint8List(requesterKey6 == null ? 6 : 12);
     out[0] = _binaryMagic;
     for (var i = 0; i < 4; i++) {
       out[1 + i] = int.parse(sessionId.substring(i * 2, i * 2 + 2), radix: 16);
     }
     out[5] = index;
+    if (requesterKey6 != null) {
+      for (var i = 0; i < 6; i++) {
+        out[6 + i] = int.parse(
+          requesterKey6!.substring(i * 2, i * 2 + 2),
+          radix: 16,
+        );
+      }
+    }
+    return out;
+  }
+}
+
+/// Session completion ACK for raw image transfers.
+///
+/// Binary format:
+///   [0x6b 'k'][sessionId:4B][requesterKey6:6B]
+class ImageSessionAck {
+  static const int _binaryMagic = 0x6b; // 'k'
+
+  final String sessionId;
+  final String requesterKey6;
+
+  const ImageSessionAck({
+    required this.sessionId,
+    required this.requesterKey6,
+  });
+
+  static bool isImageSessionAckBinary(Uint8List payload) =>
+      payload.length == 11 && payload[0] == _binaryMagic;
+
+  static ImageSessionAck? tryParseBinary(Uint8List payload) {
+    if (!isImageSessionAckBinary(payload)) return null;
+    try {
+      final sid = payload
+          .sublist(1, 5)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toLowerCase();
+      final requesterKey6 = payload
+          .sublist(5, 11)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join()
+          .toLowerCase();
+      return ImageSessionAck(sessionId: sid, requesterKey6: requesterKey6);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Uint8List encodeBinary() {
+    if (!RegExp(r'^[0-9a-fA-F]{8}$').hasMatch(sessionId)) {
+      throw ArgumentError.value(sessionId, 'sessionId', 'Expected 8 hex chars');
+    }
+    if (!RegExp(r'^[0-9a-fA-F]{12}$').hasMatch(requesterKey6)) {
+      throw ArgumentError.value(
+        requesterKey6,
+        'requesterKey6',
+        'Expected 12 hex chars',
+      );
+    }
+
+    final out = Uint8List(11);
+    out[0] = _binaryMagic;
+    for (var i = 0; i < 4; i++) {
+      out[1 + i] = int.parse(sessionId.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    for (var i = 0; i < 6; i++) {
+      out[5 + i] = int.parse(
+        requesterKey6.substring(i * 2, i * 2 + 2),
+        radix: 16,
+      );
+    }
     return out;
   }
 }

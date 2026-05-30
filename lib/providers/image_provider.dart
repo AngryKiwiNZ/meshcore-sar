@@ -56,6 +56,11 @@ class ImageProvider with ChangeNotifier {
   static const String _storageKey = 'stored_image_sessions_v1';
   static const Duration _outgoingTtl = Duration(minutes: 15);
   static const int maxDirectPayloadHops = 3;
+  static const Duration _directServeDelay = Duration(milliseconds: 350);
+  static const Duration _relayServeDelay = Duration(milliseconds: 500);
+  static const Duration _relayAckServeDelay = Duration(milliseconds: 700);
+  static const Duration _relayAckRetryDelay = Duration(milliseconds: 450);
+  static const int _relayAckServeAttempts = 3;
 
   /// Incoming sessions keyed by sessionId.
   final Map<String, ImageSession> _sessions = {};
@@ -71,6 +76,7 @@ class ImageProvider with ChangeNotifier {
     required Uint8List payload,
   })?
   sendRawPacketCallback;
+  Future<bool> Function(String sessionId, int index)? waitForFragmentAckCallback;
 
   ImageProvider() {
     _restore();
@@ -279,6 +285,20 @@ class ImageProvider with ChangeNotifier {
       );
       return false;
     }
+    final serveDelay = _serveDelayFor(
+      requester: requester,
+      requestedIndices: requestedIndices,
+    );
+    final useAckedServing = _shouldUseAckedServing(
+      requester: requester,
+      requestedIndices: requestedIndices,
+    );
+    final serveRounds = useAckedServing
+        ? 1
+        : _serveRoundsFor(
+      requester: requester,
+      requestedIndices: requestedIndices,
+    );
     return serveCachedSessionFragments<ImagePacket>(
       providerLabel: 'ImageProvider',
       sessionId: sessionId,
@@ -289,8 +309,54 @@ class ImageProvider with ChangeNotifier {
       encodeBinary: (fragment) => fragment.encodeBinary(),
       sendRawPacket: sendRawPacketCallback,
       requestedIndices: requestedIndices,
-      interFragmentDelay: const Duration(milliseconds: 350),
+      interFragmentDelay: serveDelay,
+      fragmentSendRounds: serveRounds,
+      maxFragmentSendAttempts: useAckedServing ? _relayAckServeAttempts : 1,
+      interAttemptDelay: useAckedServing ? _relayAckRetryDelay : Duration.zero,
+      waitForFragmentAck: useAckedServing
+          ? (fragment, _) => waitForFragmentAckCallback?.call(
+                fragment.sessionId,
+                fragment.index,
+              ) ??
+              Future<bool>.value(false)
+          : null,
     );
+  }
+
+  Duration _serveDelayFor({
+    required Contact requester,
+    required Set<int>? requestedIndices,
+  }) {
+    if (requester.routeHopCount <= 0) {
+      return _directServeDelay;
+    }
+    if (_shouldUseAckedServing(
+      requester: requester,
+      requestedIndices: requestedIndices,
+    )) {
+      return _relayAckServeDelay;
+    }
+    return _relayServeDelay;
+  }
+
+  int _serveRoundsFor({
+    required Contact requester,
+    required Set<int>? requestedIndices,
+  }) {
+    if (requester.routeHopCount <= 0) {
+      return 1;
+    }
+    return 1;
+  }
+
+  bool _shouldUseAckedServing({
+    required Contact requester,
+    required Set<int>? requestedIndices,
+  }) {
+    if (requester.routeHopCount <= 0) {
+      return false;
+    }
+    return waitForFragmentAckCallback != null;
   }
 
   // ── Persistence ──────────────────────────────────────────────────────────

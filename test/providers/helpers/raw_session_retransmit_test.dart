@@ -190,5 +190,98 @@ void main() {
 
       expect(ok, isFalse);
     });
+
+    test('repeats requested fragments across multiple rounds', () async {
+      final sent = <int>[];
+      final ok = await serveCachedSessionFragments<_Fragment>(
+        providerLabel: 'TestProvider',
+        sessionId: 'deadbeef',
+        requester: _buildContact(outPathLen: 2),
+        fragments: [
+          _Fragment(0, Uint8List.fromList([10])),
+          _Fragment(1, Uint8List.fromList([20])),
+          _Fragment(2, Uint8List.fromList([30])),
+        ],
+        maxDirectPayloadHops: 3,
+        indexOf: (f) => f.index,
+        encodeBinary: (f) => f.payload,
+        sendRawPacket:
+            ({
+              required contactPath,
+              required contactPathLen,
+              required payload,
+            }) async {
+              sent.add(payload.single);
+            },
+        requestedIndices: {0, 2},
+        fragmentSendRounds: 3,
+      );
+
+      expect(ok, isTrue);
+      expect(sent, [10, 30, 10, 30, 10, 30]);
+    });
+
+    test('retries a fragment until its ack arrives', () async {
+      final sent = <int>[];
+      var ackAttempts = 0;
+
+      final ok = await serveCachedSessionFragments<_Fragment>(
+        providerLabel: 'TestProvider',
+        sessionId: 'deadbeef',
+        requester: _buildContact(outPathLen: 2),
+        fragments: [
+          _Fragment(0, Uint8List.fromList([10])),
+        ],
+        maxDirectPayloadHops: 3,
+        indexOf: (f) => f.index,
+        encodeBinary: (f) => f.payload,
+        sendRawPacket:
+            ({
+              required contactPath,
+              required contactPathLen,
+              required payload,
+            }) async {
+              sent.add(payload.single);
+            },
+        maxFragmentSendAttempts: 3,
+        waitForFragmentAck: (fragment, attempt) async {
+          ackAttempts++;
+          return attempt >= 1;
+        },
+      );
+
+      expect(ok, isTrue);
+      expect(sent, [10, 10]);
+      expect(ackAttempts, equals(2));
+    });
+
+    test('fails when fragment ack never arrives', () async {
+      var sendCount = 0;
+
+      final ok = await serveCachedSessionFragments<_Fragment>(
+        providerLabel: 'TestProvider',
+        sessionId: 'deadbeef',
+        requester: _buildContact(outPathLen: 2),
+        fragments: [
+          _Fragment(0, Uint8List.fromList([10])),
+        ],
+        maxDirectPayloadHops: 3,
+        indexOf: (f) => f.index,
+        encodeBinary: (f) => f.payload,
+        sendRawPacket:
+            ({
+              required contactPath,
+              required contactPathLen,
+              required payload,
+            }) async {
+              sendCount++;
+            },
+        maxFragmentSendAttempts: 3,
+        waitForFragmentAck: (fragment, attempt) async => false,
+      );
+
+      expect(ok, isFalse);
+      expect(sendCount, equals(3));
+    });
   });
 }

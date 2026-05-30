@@ -367,7 +367,8 @@ class _SensorsTabState extends State<SensorsTab> {
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                         itemCount: watchedKeys.length,
-                        onReorderItem: (oldIndex, newIndex) =>
+                        // ignore: deprecated_member_use
+                        onReorder: (oldIndex, newIndex) =>
                             sensorsProvider.reorderSensors(oldIndex, newIndex),
                         itemBuilder: (context, index) => buildSensorCard(
                           watchedKeys[index],
@@ -397,7 +398,8 @@ class _SensorsTabState extends State<SensorsTab> {
                               buildDefaultDragHandles: false,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: watchedKeys.length,
-                              onReorderItem: (oldIndex, newIndex) => sensorsProvider
+                              // ignore: deprecated_member_use
+                              onReorder: (oldIndex, newIndex) => sensorsProvider
                                   .reorderSensors(oldIndex, newIndex),
                               itemBuilder: (context, index) => buildSensorCard(
                                 watchedKeys[index],

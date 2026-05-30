@@ -8,6 +8,10 @@ on:
     types: [published]
   workflow_dispatch:
 
+concurrency:
+  group: build-artifacts-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pages: write
@@ -47,7 +51,7 @@ jobs:
           pub-cache-key: flutter-pub-${{ runner.os }}-stable-${{ env.FLUTTER_VERSION }}-${{ runner.arch }}-${{ hashFiles('pubspec.lock') }}
 
       - name: Setup Ruby
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'release'
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
@@ -67,7 +71,7 @@ jobs:
 
       - name: Detect Android release secrets
         id: android_release_secrets
-        if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'release'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -93,7 +97,7 @@ jobs:
           fi
 
       - name: Create Android signing files
-        if: (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) && steps.android_release_secrets.outputs.has_signing == 'true'
+        if: github.event_name == 'release' && steps.android_release_secrets.outputs.has_signing == 'true'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -112,7 +116,7 @@ jobs:
         run: flutter build apk --release
 
       - name: Build Play release AAB
-        if: (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) && steps.android_release_secrets.outputs.has_signing == 'true'
+        if: github.event_name == 'release' && steps.android_release_secrets.outputs.has_signing == 'true'
         run: flutter build appbundle --release
 
       - name: Prepare Android artifacts
@@ -132,16 +136,17 @@ jobs:
             ${{ env.APP_NAME }}-*-android.apk
             ${{ env.APP_NAME }}-*-play.aab
           if-no-files-found: error
+          retention-days: 7
 
       - name: Upload Play release to internal testing
-        if: (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) && steps.android_release_secrets.outputs.has_signing == 'true' && steps.android_release_secrets.outputs.has_play_upload == 'true'
+        if: github.event_name == 'release' && steps.android_release_secrets.outputs.has_signing == 'true' && steps.android_release_secrets.outputs.has_play_upload == 'true'
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           SKIP_ANDROID_BUILD: "1"
         run: cd android && bundle exec fastlane android internal
 
       - name: Upload Play release to production
-        if: (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')) && github.event_name == 'release' && !github.event.release.prerelease && steps.android_release_secrets.outputs.has_signing == 'true' && steps.android_release_secrets.outputs.has_play_upload == 'true'
+        if: github.event_name == 'release' && !github.event.release.prerelease && steps.android_release_secrets.outputs.has_signing == 'true' && steps.android_release_secrets.outputs.has_play_upload == 'true'
         env:
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           SKIP_ANDROID_BUILD: "1"
@@ -149,6 +154,7 @@ jobs:
 
   build-linux:
     name: Build Linux App
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -199,9 +205,11 @@ jobs:
           name: release-linux
           path: "${{ env.APP_NAME }}-*-linux.tar.gz"
           if-no-files-found: error
+          retention-days: 7
 
   build-windows:
     name: Build Windows App
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
 
     steps:
@@ -244,9 +252,11 @@ jobs:
           name: release-windows
           path: "${{ env.APP_NAME }}-*-windows.zip"
           if-no-files-found: error
+          retention-days: 7
 
   build-macos:
     name: Build macOS DMG
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
 
     steps:
@@ -292,9 +302,11 @@ jobs:
           name: release-macos
           path: "${{ env.APP_NAME }}-*-macos.dmg"
           if-no-files-found: error
+          retention-days: 7
 
   build-ios:
     name: Build iOS Archive (Manual Signing)
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
 
     steps:
@@ -351,6 +363,7 @@ jobs:
             ${{ env.IOS_IPA }}
             ${{ env.IOS_RUNNER_ZIP }}
           if-no-files-found: error
+          retention-days: 7
 
   build-web:
     name: Build Web App
@@ -400,7 +413,7 @@ jobs:
 
   upload-release-assets:
     name: Upload Assets To Release
-    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     needs:
       - build-android

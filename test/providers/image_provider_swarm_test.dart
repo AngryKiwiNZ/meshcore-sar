@@ -102,7 +102,7 @@ void main() {
       expect(ImagePacket.tryParseBinary(sent.single)?.index, 2);
     });
 
-    test('repeats requested fragments for relayed recovery fetches', () async {
+    test('retries requested fragments for relayed recovery fetches when acks lag', () async {
       final provider = ImageProvider();
       provider.registerEnvelope(
         const ImageEnvelope(
@@ -136,6 +136,11 @@ void main() {
           }) async {
             sentIndexes.add(ImagePacket.tryParseBinary(payload)!.index);
           };
+      var ackAttempts = 0;
+      provider.waitForFragmentAckCallback = (sessionId, index) async {
+        ackAttempts++;
+        return ackAttempts >= 3;
+      };
 
       final ok = await provider.serveSessionTo(
         sessionId: 'deadbeef',
@@ -145,6 +150,7 @@ void main() {
 
       expect(ok, isTrue);
       expect(sentIndexes, [1, 1, 1]);
+      expect(ackAttempts, 3);
     });
   });
 }
